@@ -1,0 +1,452 @@
+'use client';
+
+import { ConfirmDialog } from '@/components/dialogs/confirm-dialog';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
+import { Input } from '@/components/ui/input';
+import { Spinner } from '@/components/ui/spinner';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useEnvironmentManager } from '@/hooks/use-environment-manager';
+import { useUpdateProject } from '@/hooks/use-projects';
+import { downloadFile, generateEnvFile, parseEnvFile } from '@/lib/env-parser';
+import { cn } from '@/lib/utils';
+import { EnvVariable } from '@/schema';
+import { IProject } from '@/types';
+import {
+  Add01Icon,
+  Alert01Icon,
+  AlertCircleIcon,
+  Cancel01Icon,
+  Copy01Icon,
+  Download01Icon,
+  SaveIcon,
+  Tick01Icon,
+  Delete02Icon,
+  Upload02Icon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import React, { useCallback, useRef, useState } from 'react';
+import { toast } from 'react-hot-toast';
+import { VariablesList } from './variable-list';
+
+type DeleteConfirmState = { open: boolean; index: number; varName: string };
+
+interface EnvEditorProps {
+  project: IProject;
+  readOnly?: boolean;
+}
+
+export function EnvEditor({ project, readOnly = false }: EnvEditorProps) {
+  const { mutateAsync: updateProject } = useUpdateProject();
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [addingEnv, setAddingEnv] = useState(false);
+  const [newEnvName, setNewEnvName] = useState('');
+  const [deleteEnvConfirm, setDeleteEnvConfirm] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    envNames,
+    activeTab,
+    setActiveTab,
+    activeVariables,
+    addVariable,
+    updateVariable,
+    deleteVariable,
+    bulkAddVariables,
+    getValidVariables,
+    addEnvironment,
+    removeEnvironment,
+    getAllEnvironments,
+  } = useEnvironmentManager(project.environments ?? []);
+
+  const [hiddenValues, setHiddenValues] = useState<Set<number>>(new Set());
+
+  const markChanged = useCallback(() => setHasUnsavedChanges(true), []);
+
+  const toggleVisibility = useCallback((index: number) => {
+    setHiddenValues((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }, []);
+
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>({
+    open: false,
+    index: -1,
+    varName: '',
+  });
+
+  const handleAddVariable = useCallback(() => {
+    addVariable();
+    markChanged();
+  }, [addVariable, markChanged]);
+
+  const handleDeleteVariable = useCallback(
+    (index: number) => {
+      const variable = activeVariables[index];
+      setDeleteConfirm({
+        open: true,
+        index,
+        varName: variable?.key || `Variable ${index + 1}`,
+      });
+    },
+    [activeVariables],
+  );
+
+  const confirmDeleteVariable = useCallback(() => {
+    deleteVariable(deleteConfirm.index);
+    markChanged();
+    setDeleteConfirm({ open: false, index: -1, varName: '' });
+  }, [deleteVariable, deleteConfirm.index, markChanged]);
+
+  const handleUpdateVariable = useCallback(
+    (index: number, field: keyof EnvVariable, value: string) => {
+      updateVariable(index, field, value);
+      markChanged();
+    },
+    [updateVariable, markChanged],
+  );
+
+  const formatLastSaved = (date: Date) => {
+    const diffMins = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    return `${Math.floor(diffMins / 60)}h ago`;
+  };
+
+  const saveProject = useCallback(async () => {
+    setSaveStatus('saving');
+    try {
+      await updateProject({
+        id: project._id as string,
+        data: { environments: getAllEnvironments() },
+      });
+      setSaveStatus('saved');
+      setLastSaved(new Date());
+      setHasUnsavedChanges(false);
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch {
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    }
+  }, [updateProject, project._id, getAllEnvironments]);
+
+  const handleTabChange = useCallback(
+    (newTab: string) => {
+      setActiveTab(newTab);
+      setHiddenValues(new Set());
+    },
+    [setActiveTab],
+  );
+
+  const handleBulkAdd = useCallback(
+    (newVariables: EnvVariable[]) => {
+      if (newVariables.length > 0) {
+        bulkAddVariables(newVariables);
+        markChanged();
+      }
+    },
+    [bulkAddVariables, markChanged],
+  );
+
+  const handleDownload = useCallback(() => {
+    try {
+      const valid = getValidVariables();
+      const filename = `${project.name}.${activeTab}.env`;
+      downloadFile(generateEnvFile(valid), filename);
+    } catch {
+      toast.error('Failed to download');
+    }
+  }, [getValidVariables, project.name, activeTab]);
+
+  const copyToClipboard = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(generateEnvFile(getValidVariables()));
+      toast.success('Copied to clipboard');
+    } catch {
+      toast.error('Failed to copy');
+    }
+  }, [getValidVariables]);
+
+  const processFile = useCallback(
+    (file: File) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        try {
+          const parsed = parseEnvFile(content).map((v) => ({ key: v.key, value: v.value }));
+          if (parsed.length === 0) {
+            toast.error('No valid variables found');
+            return;
+          }
+          handleBulkAdd(parsed);
+          toast.success(`Imported ${parsed.length} variable${parsed.length !== 1 ? 's' : ''}`);
+        } catch {
+          toast.error('Failed to parse file');
+        }
+      };
+      reader.readAsText(file);
+    },
+    [handleBulkAdd],
+  );
+
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(e.type === 'dragenter' || e.type === 'dragover');
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
+      if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
+    },
+    [processFile],
+  );
+
+  const handleFileInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files?.[0]) processFile(e.target.files[0]);
+    },
+    [processFile],
+  );
+
+  const handleAddEnvironment = useCallback(() => {
+    const name = newEnvName.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!name) return;
+    if (addEnvironment(name)) {
+      setNewEnvName('');
+      setAddingEnv(false);
+      markChanged();
+    } else {
+      toast.error('Environment already exists or limit reached');
+    }
+  }, [newEnvName, addEnvironment, markChanged]);
+
+  const hasVariables = activeVariables.length > 0;
+
+  return (
+    <div
+      className={cn(
+        'mx-auto w-full max-w-4xl px-6 relative',
+        dragActive && 'ring-2 ring-primary ring-inset rounded-lg',
+      )}
+      onDragEnter={handleDrag}
+      onDragLeave={handleDrag}
+      onDragOver={handleDrag}
+      onDrop={handleDrop}
+    >
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".env,.txt,.json,.yml,.yaml"
+        onChange={handleFileInput}
+        className="hidden"
+      />
+
+      {dragActive && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/90 border-2 border-dashed border-primary">
+          <div className="text-center">
+            <HugeiconsIcon icon={Upload02Icon} size={32} className="mx-auto mb-2 text-primary" />
+            <p className="text-sm font-medium">Drop your .env file here</p>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex flex-col gap-6 py-8">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold">{project.name}</h1>
+            <p className="text-sm text-muted-foreground">
+              {project.description || 'Environment variables'}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              {lastSaved && (
+                <span className="text-xs text-muted-foreground/70 flex items-center gap-1.5">
+                  <HugeiconsIcon icon={Tick01Icon} size={10} />
+                  Saved {formatLastSaved(lastSaved)}
+                </span>
+              )}
+              {hasUnsavedChanges && saveStatus === 'idle' && (
+                <span className="text-xs text-destructive flex items-center gap-1.5 bg-destructive/10 px-2 py-1 rounded-full">
+                  <HugeiconsIcon icon={Alert01Icon} size={12} /> Unsaved changes
+                </span>
+              )}
+            </div>
+          </div>
+          <ButtonGroup className="flex-wrap justify-end">
+            <Button variant="outline" onClick={copyToClipboard} title="Copy">
+              <HugeiconsIcon icon={Copy01Icon} size={16} />
+              Copy
+            </Button>
+            <Button variant="outline" onClick={handleDownload} title="Export">
+              <HugeiconsIcon icon={Download01Icon} size={16} />
+              Export
+            </Button>
+            {!readOnly && (
+              <Button
+                onClick={saveProject}
+                disabled={saveStatus === 'saving'}
+                variant={saveStatus === 'error' ? 'destructive' : 'default'}
+                className="min-w-[100px]"
+              >
+                {saveStatus === 'saving' && <><Spinner /> Saving</>}
+                {saveStatus === 'saved' && <><HugeiconsIcon icon={Tick01Icon} size={16} /> Saved!</>}
+                {saveStatus === 'error' && <><HugeiconsIcon icon={AlertCircleIcon} size={16} /> Retry</>}
+                {saveStatus === 'idle' && <><HugeiconsIcon icon={SaveIcon} size={16} /> Save</>}
+              </Button>
+            )}
+          </ButtonGroup>
+        </div>
+      </div>
+
+      {/* Environment Tabs */}
+      <div className="space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
+          <div className="flex flex-wrap items-center gap-3">
+            <TabsList className="flex-wrap">
+              {envNames.map((name) => (
+                <TabsTrigger key={name} value={name} className="gap-2 px-3 py-2">
+                  <span className="capitalize">{name}</span>
+                  {!readOnly && envNames.length > 1 && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDeleteEnvConfirm({ open: true, name });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.stopPropagation();
+                          setDeleteEnvConfirm({ open: true, name });
+                        }
+                      }}
+                      className="ml-1 inline-flex rounded-full p-1 hover:bg-destructive/10 transition-colors"
+                    >
+                      <HugeiconsIcon icon={Delete02Icon} size={12} className="text-destructive" />
+                    </span>
+                  )}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {!readOnly && (
+              addingEnv ? (
+                <div className="flex items-center gap-2 p-1 bg-muted rounded-lg">
+                  <Input
+                    value={newEnvName}
+                    onChange={(e) => setNewEnvName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddEnvironment();
+                      if (e.key === 'Escape') { setAddingEnv(false); setNewEnvName(''); }
+                    }}
+                    placeholder="Environment name"
+                    className="h-9 w-40 text-sm"
+                    autoFocus
+                  />
+                  <Button size="icon" variant="ghost" className="size-9" onClick={handleAddEnvironment}>
+                    <HugeiconsIcon icon={Tick01Icon} size={16} />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="size-9" onClick={() => { setAddingEnv(false); setNewEnvName(''); }}>
+                    <HugeiconsIcon icon={Cancel01Icon} size={16} />
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAddingEnv(true)}
+                  title="Add environment"
+                  className="h-9"
+                >
+                  <HugeiconsIcon icon={Add01Icon} size={16} />
+                  Add Environment
+                </Button>
+              )
+            )}
+          </div>
+
+          {envNames.map((name) => (
+            <TabsContent key={name} value={name} className="mt-6">
+              {name === activeTab && (
+                hasVariables ? (
+                  <VariablesList
+                    variables={activeVariables}
+                    hiddenValues={hiddenValues}
+                    onAddVariable={handleAddVariable}
+                    onUpdateVariable={handleUpdateVariable}
+                    onToggleVisibility={toggleVisibility}
+                    onDeleteVariable={handleDeleteVariable}
+                    onSmartPaste={handleBulkAdd}
+                  />
+                ) : (
+                  <div className="py-20 text-center">
+                    <div className="max-w-md mx-auto space-y-4">
+                      <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto">
+                        <HugeiconsIcon icon={Add01Icon} size={32} className="text-muted-foreground/60" />
+                      </div>
+                      <p className="text-base text-muted-foreground">
+                        {readOnly
+                          ? `No variables in ${name}.`
+                          : `No variables in ${name} yet.`}
+                      </p>
+                      {!readOnly && (
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-6">
+                          <Button onClick={handleAddVariable} className="w-full sm:w-auto">
+                            <HugeiconsIcon icon={Add01Icon} size={16} />
+                            Add Variable
+                          </Button>
+                          <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full sm:w-auto">
+                            <HugeiconsIcon icon={Upload02Icon} size={16} />
+                            Import File
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              )}
+            </TabsContent>
+          ))}
+        </Tabs>
+      </div>
+
+      {/* Delete variable confirm */}
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm((prev) => ({ ...prev, open }))}
+        title="Delete Environment Variable"
+        description={`Are you sure you want to delete "${deleteConfirm.varName}"?`}
+        confirmText="Yes, Delete"
+        cancelText="No, Keep it"
+        onConfirm={confirmDeleteVariable}
+        variant="destructive"
+      />
+
+      {/* Delete environment confirm */}
+      <ConfirmDialog
+        open={deleteEnvConfirm.open}
+        onOpenChange={(open) => setDeleteEnvConfirm((prev) => ({ ...prev, open }))}
+        title="Delete Environment"
+        description={`Are you sure you want to delete the "${deleteEnvConfirm.name}" environment and all its variables?`}
+        confirmText="Yes, Delete"
+        cancelText="No, Keep it"
+        onConfirm={() => {
+          removeEnvironment(deleteEnvConfirm.name);
+          markChanged();
+          setDeleteEnvConfirm({ open: false, name: '' });
+        }}
+        variant="destructive"
+      />
+    </div>
+  );
+}

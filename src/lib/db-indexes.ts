@@ -1,4 +1,4 @@
-import { client } from '@/lib/db';
+import clientPromise from '@/lib/db';
 import { env } from '@/schema/env';
 import type { Db } from 'mongodb';
 
@@ -24,6 +24,7 @@ export function ensureIndexes(): Promise<void> {
 }
 
 async function doEnsure(): Promise<void> {
+  const client = await clientPromise;
   const db: Db = client.db(env.DATABASE_NAME);
 
   await Promise.all([
