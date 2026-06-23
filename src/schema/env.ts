@@ -3,8 +3,6 @@ import { z } from 'zod';
 
 const EnvSchema = z.object({
   AUTH_SECRET: z.string().min(1),
-  AUTH_GITHUB_ID: z.string().min(1),
-  AUTH_GITHUB_SECRET: z.string().min(1),
   MONGODB_URI: z.string().url().or(z.string().startsWith('mongodb')),
   DATABASE_NAME: z.string().min(1).default(DEFAULT_DATABASE_NAME),
   ENCRYPTION_SECRET: z
@@ -26,8 +24,6 @@ const STRICT_VALIDATION =
 const raw = STRICT_VALIDATION
   ? {
       AUTH_SECRET: process.env.AUTH_SECRET,
-      AUTH_GITHUB_ID: process.env.AUTH_GITHUB_ID,
-      AUTH_GITHUB_SECRET: process.env.AUTH_GITHUB_SECRET,
       MONGODB_URI: process.env.MONGODB_URI,
       NODE_ENV: process.env.NODE_ENV,
       DATABASE_NAME: process.env.DATABASE_NAME,
@@ -36,8 +32,6 @@ const raw = STRICT_VALIDATION
     }
   : {
       AUTH_SECRET: process.env.AUTH_SECRET ?? 'dev-secret',
-      AUTH_GITHUB_ID: process.env.AUTH_GITHUB_ID ?? 'dev-github-id',
-      AUTH_GITHUB_SECRET: process.env.AUTH_GITHUB_SECRET ?? 'dev-github-secret',
       MONGODB_URI:
         process.env.MONGODB_URI ?? 'mongodb://localhost:27017/opsio',
       NODE_ENV: process.env.NODE_ENV ?? 'development',
