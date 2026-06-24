@@ -3,6 +3,17 @@
 It is a simple tool that allows you to manage your environment variables in a more efficient way. With Opsio, you can easily create, read, update and delete your .env files without having to manually edit them. Opsio provides a user-friendly interface that makes it easy to manage your env.
 
 ![Opsio Screenshot](/demo/screenshot.png)
+## Tech Stack 
+
+- Next.js
+- TypeScript
+- Tailwind CSS
+- MongoDB
+- Clerk 
+
+## How it works
+
+When you sign in to Opsio, you will be able to create a new project or select an existing one. Once you have selected a project, you will be able to view all the environment variables associated with that project. You can add new environment variables, edit existing ones or delete them as needed You can also search and filter the environment variables to quickly find what you are looking for. Additionally, you can export the environment variables to your local machine for use in your development environment.
 
 ## Folder Structure
 
