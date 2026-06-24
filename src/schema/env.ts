@@ -2,7 +2,6 @@ import { DEFAULT_DATABASE_NAME, MIN_ENCRYPTION_SECRET_LENGTH } from '@/config/ap
 import { z } from 'zod';
 
 const EnvSchema = z.object({
-  AUTH_SECRET: z.string().min(1),
   MONGODB_URI: z.string().url().or(z.string().startsWith('mongodb')),
   DATABASE_NAME: z.string().min(1).default(DEFAULT_DATABASE_NAME),
   ENCRYPTION_SECRET: z
@@ -23,7 +22,6 @@ const STRICT_VALIDATION =
 
 const raw = STRICT_VALIDATION
   ? {
-      AUTH_SECRET: process.env.AUTH_SECRET,
       MONGODB_URI: process.env.MONGODB_URI,
       NODE_ENV: process.env.NODE_ENV,
       DATABASE_NAME: process.env.DATABASE_NAME,
@@ -31,7 +29,6 @@ const raw = STRICT_VALIDATION
       RESEND_API_KEY: process.env.RESEND_API_KEY,
     }
   : {
-      AUTH_SECRET: process.env.AUTH_SECRET ?? 'dev-secret',
       MONGODB_URI:
         process.env.MONGODB_URI ?? 'mongodb://localhost:27017/opsio',
       NODE_ENV: process.env.NODE_ENV ?? 'development',
